@@ -1,4 +1,5 @@
 from unstructured.partition.pdf import partition_pdf
+from tqdm import tqdm
 import os
 
 
@@ -26,8 +27,9 @@ class ElementExtractor:
                       if file.split(".")[-1] == 'pdf']
         print(f'Identified {len(file_paths)} PDF files for processing')
 
-        for file_path in file_paths:
+        for file_path in tqdm(file_paths, ncols=100):
             self.raw_elements.append(partition_pdf(filename=file_path,
+                                                   strategy='hi_res',
                                                    chunking_strategy='by_title',
                                                    max_characters=self.chunk_size,
                                                    extract_image_block_types=['Image'],
@@ -39,7 +41,6 @@ class ElementExtractor:
         """
         Categorize extracted elements from a PDF into tables and texts.
         raw_pdf_elements: List of lists of unstructured.documents.elements
-        :return:
         """
 
         for pdf_elements in self.raw_elements:

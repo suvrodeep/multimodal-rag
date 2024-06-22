@@ -6,8 +6,10 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from tqdm import tqdm
 
 import sys
+
 sys.path.extend(['./src'])
 
 from extract_doc_elements import ElementExtractor
@@ -17,18 +19,6 @@ input_path = "../data/input"
 image_path = "../data/image"
 key_path = "../config/keys.ini"
 config_path = "../config/model_config.ini"
-
-# Extract elements
-element_extractor = ElementExtractor(input_dir=input_path, image_dir=image_path)
-element_extractor.get_raw_elements()
-element_extractor.categorize_elements()
-
-# Tokenize text chunks
-tokenizer = Tokenizer(raw_texts=element_extractor.raw_texts)
-tokenizer.generate_tokens()
-
-# Get tables
-raw_tables = element_extractor.raw_tables
 
 
 def get_model(mode: str) -> ChatOpenAI:
@@ -78,14 +68,17 @@ def image_summarize(img_base64, prompt):
 
 
 class Summarize:
-    def __init__(self, texts: List[Dict[List[str], str, str]],
-                 tables: List[Dict[str, str, str]],
+    def __init__(self, texts: List[Dict],
+                 tables: List[Dict],
                  image_dir: str,
                  summarize_text: bool = True):
         self.texts = texts
         self.tables = tables
         self.summarize_text = summarize_text
         self.image_dir = image_dir
+
+        # Store image summaries
+        self.image_summaries = []
 
     def get_table_and_text_summaries(self):
         """
@@ -113,35 +106,55 @@ class Summarize:
             text_summaries = text_tokens
 
         # Apply to tables if tables are provided
-        tables = [item['raw_text'] for item in self.tables]
-        if tables:
-            table_summaries = summarize_chain.batch(tables, {"max_concurrency": 5})
+        table_texts = [item['raw_text'] for item in self.tables]
+        if table_texts:
+            table_summaries = summarize_chain.batch(table_texts, {"max_concurrency": 5})
 
-        return text_summaries, table_summaries
+        # Add table and text metadata to summaries
+        for text, summary in zip(self.texts, text_summaries):
+            text['summary'] = summary
+        for table, summary in zip(self.tables, table_summaries):
+            table['summary'] = summary
 
     def generate_image_summaries(self):
         """
         Generate summaries and base64 encoded strings for images
         """
-        # Store base64 encoded images
-        img_base64_list = []
-
-        # Store image summaries
-        image_summaries = []
-
         # Prompt
         prompt = """You are an assistant tasked with summarizing images for retrieval. \
         These summaries will be embedded and used to retrieve the raw image. \
         Give a concise summary of the image that is well optimized for retrieval."""
 
-        # Apply to images
-        path = self.image_dir
+        # Apply summarization to images
+        images = [self.image_dir + '/' + file for file in os.listdir(self.image_dir)
+                  if file.split(".")[-1] in ['jpg', 'png']]
+        print(f'Identified {len(images)} image files for processing')
 
-        for img_file in sorted(os.listdir(path)):
-            if img_file.endswith(".jpg"):
-                img_path = os.path.join(path, img_file)
-                base64_image = encode_image(img_path)
-                img_base64_list.append(base64_image)
-                image_summaries.append(image_summarize(base64_image, prompt))
+        for img_file in tqdm(images, ncols=100):
+            base64_image = encode_image(img_file)
+            self.image_summaries.append({'image_path': img_file,
+                                         'img_base64': base64_image,
+                                         'summary': image_summarize(base64_image, prompt)})
 
-        return img_base64_list, image_summaries
+
+# Extract elements
+element_extractor = ElementExtractor(input_dir=input_path, image_dir=image_path)
+element_extractor.get_raw_elements()
+element_extractor.categorize_elements()
+
+# Tokenize text chunks
+tokenizer = Tokenizer(raw_texts=element_extractor.raw_texts)
+tokenizer.generate_tokens()
+
+# Get tables and tokenized text
+raw_tables = element_extractor.raw_tables
+tokenized_texts = tokenizer.tokens
+
+# Get summaries
+summarize = Summarize(texts=tokenized_texts, tables=raw_tables, image_dir=image_path)
+
+summarize.get_table_and_text_summaries()
+text_summaries, table_summaries = summarize.texts, summarize.tables
+
+summarize.generate_image_summaries()
+image_summaries = summarize.image_summaries
