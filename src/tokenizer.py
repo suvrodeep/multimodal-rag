@@ -27,6 +27,6 @@ class Tokenizer:
             joined_texts = " ".join([text['raw_text'] for text in self.raw_texts if text['doc_path'] == doc])
             tokens = text_splitter.split_text(joined_texts)
             self.tokens.append({'tokens': tokens,
-                                'text': joined_texts,
+                                'raw_text': joined_texts,
                                 'doc_path': doc
                                 })

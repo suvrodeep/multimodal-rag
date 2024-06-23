@@ -1,5 +1,6 @@
 import base64
 import os
+
 from typing import List, Dict
 from configparser import ConfigParser
 from langchain_core.messages import HumanMessage
@@ -8,39 +9,6 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from tqdm import tqdm
 
-import sys
-
-sys.path.extend(['./src'])
-
-from extract_doc_elements import ElementExtractor
-from extract_doc_elements import set_environ_vars
-from tokenizer import Tokenizer
-
-input_path = "../data/input"
-image_path = "../data/image"
-key_path = "../config/keys.ini"
-config_path = "../config/model_config.ini"
-
-
-def get_model(mode: str) -> ChatOpenAI:
-    if mode == 'image':
-        config_section = 'image-summary'
-    else:
-        config_section = 'text-summary'
-
-    # Read model config
-    config = ConfigParser()
-
-    config.read(key_path)
-    api_key = config['multimodal-rag']['API_Key']
-
-    config.read(config_path)
-    model = config[config_section]['model']
-    temp = int(config[config_section]['temperature'])
-    max_tokens = int(config[config_section]['max_tokens'])
-
-    return ChatOpenAI(model=model, max_tokens=max_tokens, api_key=api_key, temperature=temp)
-
 
 def encode_image(image_path):
     """Getting the base64 string"""
@@ -48,38 +16,60 @@ def encode_image(image_path):
         return base64.b64encode(image_file.read()).decode("utf-8")
 
 
-def image_summarize(img_base64, prompt):
-    """Make image summary"""
-    llm = get_model(mode='image')
-
-    msg = llm.invoke(
-        [
-            HumanMessage(
-                content=[
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
-                     },
-                ]
-            )
-        ]
-    )
-
-    return msg.content
-
-
 class Summarize:
     def __init__(self, texts: List[Dict],
                  tables: List[Dict],
                  image_dir: str,
+                 key_path: str,
+                 config_path: str,
                  summarize_text: bool = True):
         self.texts = texts
         self.tables = tables
         self.summarize_text = summarize_text
         self.image_dir = image_dir
+        self.key_path = key_path
+        self.config_path = config_path
 
         # Store image summaries
         self.image_summaries = []
+
+    def get_model(self, mode: str) -> ChatOpenAI:
+        if mode == 'image':
+            config_section = 'image-summary'
+        else:
+            config_section = 'text-summary'
+
+        # Read model config
+        config = ConfigParser()
+
+        config.read(self.key_path)
+        api_key = config['multimodal-rag']['API_Key']
+
+        config.read(self.config_path)
+        model = config[config_section]['model']
+        temp = int(config[config_section]['temperature'])
+        max_tokens = int(config[config_section]['max_tokens'])
+
+        return ChatOpenAI(model=model, max_tokens=max_tokens, api_key=api_key, temperature=temp)
+
+    def image_summarize(self, img_base64, prompt):
+        """Make image summary"""
+        llm = self.get_model(mode='image')
+
+        msg = llm.invoke(
+            [
+                HumanMessage(
+                    content=[
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url",
+                         "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"},
+                         },
+                    ]
+                )
+            ]
+        )
+
+        return msg.content
 
     def get_table_and_text_summaries(self):
         """
@@ -92,7 +82,7 @@ class Summarize:
         prompt = ChatPromptTemplate.from_template(prompt_text)
 
         # Text summary chain
-        llm = get_model(mode='text')
+        llm = self.get_model(mode='text')
         summarize_chain = {"element": lambda x: x} | prompt | llm | StrOutputParser()
 
         # Initialize empty summaries
@@ -137,28 +127,4 @@ class Summarize:
             base64_image = encode_image(img_file)
             self.image_summaries.append({'image_path': img_file,
                                          'img_base64': base64_image,
-                                         'summary': image_summarize(base64_image, prompt)})
-
-
-# Extract elements
-set_environ_vars()
-element_extractor = ElementExtractor(input_dir=input_path, image_dir=image_path)
-element_extractor.get_raw_elements()
-element_extractor.categorize_elements()
-
-# Tokenize text chunks
-tokenizer = Tokenizer(raw_texts=element_extractor.raw_texts)
-tokenizer.generate_tokens()
-
-# Get tables and tokenized text
-raw_tables = element_extractor.raw_tables
-tokenized_texts = tokenizer.tokens
-
-# Get summaries
-summarize = Summarize(texts=tokenized_texts, tables=raw_tables, image_dir=image_path)
-
-summarize.get_table_and_text_summaries()
-text_summaries, table_summaries = summarize.texts, summarize.tables
-
-summarize.generate_image_summaries()
-image_summaries = summarize.image_summaries
+                                         'summary': self.image_summarize(base64_image, prompt)})
