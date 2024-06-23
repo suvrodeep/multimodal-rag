@@ -5,7 +5,7 @@ from typing import List, Dict
 class Tokenizer:
     def __init__(self, raw_texts: List[Dict[str, str]], chunk_size: int = None, chunk_overlap: int = None):
         if chunk_size is None:
-            self.chunk_size = 2048
+            self.chunk_size = 4000
         else:
             self.chunk_size = chunk_size
 

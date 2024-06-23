@@ -13,6 +13,7 @@ import sys
 sys.path.extend(['./src'])
 
 from extract_doc_elements import ElementExtractor
+from extract_doc_elements import set_environ_vars
 from tokenizer import Tokenizer
 
 input_path = "../data/input"
@@ -100,6 +101,7 @@ class Summarize:
 
         # Apply to text if texts are provided and summarization is requested
         text_tokens = [item['tokens'] for item in self.texts]
+        print(f'Summarizing {len(text_tokens)} tokenized text elements')
         if text_tokens and self.summarize_text:
             text_summaries = summarize_chain.batch(text_tokens, {"max_concurrency": 5})
         elif text_tokens:
@@ -107,6 +109,7 @@ class Summarize:
 
         # Apply to tables if tables are provided
         table_texts = [item['raw_text'] for item in self.tables]
+        print(f'Summarizing {len(table_texts)} table elements')
         if table_texts:
             table_summaries = summarize_chain.batch(table_texts, {"max_concurrency": 5})
 
@@ -138,6 +141,7 @@ class Summarize:
 
 
 # Extract elements
+set_environ_vars()
 element_extractor = ElementExtractor(input_dir=input_path, image_dir=image_path)
 element_extractor.get_raw_elements()
 element_extractor.categorize_elements()

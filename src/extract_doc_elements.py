@@ -3,6 +3,12 @@ from tqdm import tqdm
 import os
 
 
+def set_environ_vars():
+    # Set environment variables for image padding
+    os.environ['EXTRACT_IMAGE_BLOCK_CROP_HORIZONTAL_PAD'] = '10'
+    os.environ['EXTRACT_IMAGE_BLOCK_CROP_VERTICAL_PAD'] = '10'
+
+
 class ElementExtractor:
     def __init__(self, input_dir: str, image_dir: str, chunk_size: int = None):
         self.input_dir = input_dir
@@ -12,7 +18,7 @@ class ElementExtractor:
         self.raw_tables = []
 
         if chunk_size is None:
-            self.chunk_size = 4096
+            self.chunk_size = 4000
         else:
             self.chunk_size = chunk_size
 
@@ -20,21 +26,26 @@ class ElementExtractor:
     def get_raw_elements(self):
         """
         Get raw elements from PDF
-        :return:
         """
         # Get elements
         file_paths = [self.input_dir + '/' + file for file in os.listdir(self.input_dir)
                       if file.split(".")[-1] == 'pdf']
         print(f'Identified {len(file_paths)} PDF files for processing')
 
+        max_chunk_size = self.chunk_size
+        preferred_chunk_size = self.chunk_size - 200
+        text_combination_threshold = int(self.chunk_size / 2)
+
         for file_path in tqdm(file_paths, ncols=100):
             self.raw_elements.append(partition_pdf(filename=file_path,
-                                                   strategy='hi_res',
                                                    chunking_strategy='by_title',
-                                                   max_characters=self.chunk_size,
+                                                   max_characters=max_chunk_size,
+                                                   new_after_n_chars=preferred_chunk_size,
+                                                   combine_text_under_n_chars=text_combination_threshold,
+                                                   infer_table_structure=True,
                                                    extract_image_block_types=['Image'],
-                                                   extract_image_block_output_dir=self.image_dir,
-                                                   infer_table_structure=True))
+                                                   extract_image_block_output_dir=self.image_dir
+                                                   ))
 
     # Categorize elements by type
     def categorize_elements(self):
