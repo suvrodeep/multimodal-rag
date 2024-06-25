@@ -125,6 +125,5 @@ class Summarize:
 
         for img_file in tqdm(images, ncols=100):
             base64_image = encode_image(img_file)
-            self.image_summaries.append({'image_path': img_file,
-                                         'img_base64': base64_image,
+            self.image_summaries.append({'img_base64': base64_image,
                                          'summary': self.image_summarize(base64_image, prompt)})

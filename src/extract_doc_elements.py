@@ -71,4 +71,3 @@ class ElementExtractor:
 
         print(f'Got {len(self.raw_texts)} text elements')
         print(f'Got {len(self.raw_tables)} table elements')
-

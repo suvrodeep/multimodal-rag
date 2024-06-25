@@ -9,148 +9,120 @@ from typing import List, Dict
 from tqdm import tqdm
 from configparser import ConfigParser
 
-import sys
 
-sys.path.extend(['./src'])
+class VectorStore:
+    def __init__(self, key_path: str, config_path: str):
+        self.key_path = key_path
+        self.config_path = config_path
 
-from extract_doc_elements import ElementExtractor
-from extract_doc_elements import set_environ_vars
-from generate_summaries import Summarize
-from tokenizer import Tokenizer
+    def create_vector_store(self):
+        # The vectorstore to use to index the summaries
+        config = ConfigParser()
 
+        config.read(self.key_path)
+        api_key = config['multimodal-rag']['API_Key']
 
-input_path = "./data/input"
-image_path = "./data/image"
-key_path = "./config/keys.ini"
-config_path = "./config/model_config.ini"
+        config.read(self.config_path)
+        embedding_model = config['embedding']['model']
 
-
-def create_multi_vector_retriever(vectorstore,
-                                  text_summaries: List[str],
-                                  texts: List[Dict],
-                                  table_summaries: List[str],
-                                  tables: List[Dict],
-                                  image_summaries: List[str],
-                                  images: List[str]):
-    """
-    Create retriever that indexes summaries, but returns raw images or texts
-    """
-
-    # Initialize the storage layer
-    store = InMemoryStore()
-    id_key = "doc_id"
-
-    # Create the multi-vector retriever
-    retriever = MultiVectorRetriever(
-        vectorstore=vectorstore,
-        docstore=store,
-        id_key=id_key,
-    )
-
-    # Helper function to add documents to the vectorstore and docstore
-    def add_documents(retriever: MultiVectorRetriever,
-                      doc_summaries: List[str],
-                      doc_contents: List[Dict | str]
-                      ):
-        doc_ids = [str(uuid.uuid4()) for _ in doc_contents]
-
-        summary_docs = []
-        for index, summary in enumerate(tqdm(doc_summaries, ncols=100)):
-            summary_docs.append(Document(page_content=summary, metadata={id_key: doc_ids[index]}))
-        # summary_docs = [
-        #     Document(page_content=summary, metadata={id_key: doc_ids[index]})
-        #     for index, summary in enumerate(doc_summaries)
-        # ]
-
-        retriever.vectorstore.add_documents(summary_docs)
-        retriever.docstore.mset(list(zip(doc_ids, doc_contents)))
-
-    # Add texts, tables, and images
-    # Check that text_summaries is not empty before adding
-    if text_summaries:
-        print("Embedding text summaries")
-        add_documents(retriever=retriever, doc_summaries=text_summaries, doc_contents=texts)
-    # Check that table_summaries is not empty before adding
-    if table_summaries:
-        print("Embedding table summaries")
-        add_documents(retriever=retriever, doc_summaries=table_summaries, doc_contents=tables)
-    # Check that image_summaries is not empty before adding
-    if image_summaries:
-        print("Embedding image summaries")
-        add_documents(retriever=retriever, doc_summaries=image_summaries, doc_contents=images)
-
-    return retriever
+        vectorstore = Chroma(collection_name="multimodal-rag",
+                             embedding_function=OpenAIEmbeddings(model=embedding_model,
+                                                                 openai_api_key=api_key)
+                             )
+        return vectorstore
 
 
-# The vectorstore to use to index the summaries
-config = ConfigParser()
-config.read(key_path)
-api_key = config['multimodal-rag']['API_Key']
-vectorstore = Chroma(collection_name="multimodal-rag",
-                     embedding_function=OpenAIEmbeddings(model='text-embedding-3-large',
-                                                         openai_api_key=api_key)
-                     )
+class MultiModalRetriever:
+    def __init__(self,
+                 vectorstore,
+                 text_composites: List[Dict],
+                 table_composites: List[Dict],
+                 image_composites: List[Dict]
+                 ):
 
-# Extract elements
-set_environ_vars()
-element_extractor = ElementExtractor(input_dir=input_path, image_dir=image_path)
-element_extractor.get_raw_elements()
-element_extractor.categorize_elements()
+        self.vector_store = vectorstore
+        self.text_composites = text_composites
+        self.table_composites = table_composites
+        self.image_composites = image_composites
 
-# Tokenize text chunks
-tokenizer = Tokenizer(raw_texts=element_extractor.raw_texts)
-tokenizer.generate_tokens()
+    def split_composites(self, composite_type: str):
+        """
+        Break composite elements into their constituent raw texts and summaries
+        """
+        if composite_type == 'table':
+            tables, table_summaries = [], []
+            for item in self.table_composites:
+                tables.append({'text_as_html': item['text_as_html'],
+                               'doc_path': item['doc_path']
+                               })
+                table_summaries.append(item['summary'])
+            return tables, table_summaries
+        elif composite_type == 'text':
+            texts, text_summaries = [], []
+            for item in self.text_composites:
+                texts.append({'raw_text': item['raw_text'],
+                              'doc_path': item['doc_path']
+                              })
+                text_summaries.append(item['summary'])
+            return texts, text_summaries
+        elif composite_type == 'image':
+            images, image_summaries = [], []
+            for item in self.image_composites:
+                images.append(item['img_base64'])
+                image_summaries.append(item['summary'])
+            return images, image_summaries
+        else:
+            return [], []
 
-# Get tables and tokenized text
-raw_tables = element_extractor.raw_tables
-tokenized_texts = tokenizer.tokens
+    def create_multi_vector_retriever(self):
+        """
+        Create retriever that indexes summaries, but returns raw images or texts
+        """
+        texts, text_summaries = self.split_composites(composite_type='text')
+        tables, table_summaries = self.split_composites(composite_type='table')
+        images, image_summaries = self.split_composites(composite_type='image')
 
-# Get summaries
-summarize = Summarize(texts=tokenized_texts,
-                      tables=raw_tables,
-                      image_dir=image_path,
-                      key_path=key_path,
-                      config_path=config_path)
+        # Initialize the storage layer
+        store = InMemoryStore()
+        id_key = "doc_id"
 
-# Generate text and table summaries
-summarize.get_table_and_text_summaries()
-text_composites, table_composites = summarize.texts, summarize.tables
-texts, text_summaries = [], []
-tables, table_summaries = [], []
+        # Create the multi-vector retriever
+        retriever = MultiVectorRetriever(vectorstore=self.vector_store,
+                                         docstore=store,
+                                         id_key=id_key,
+                                         )
 
-for item in text_composites:
-    texts.append({'raw_text': item['raw_text'],
-                  'doc_path': item['doc_path']
-                  })
-    text_summaries.append(item['summary'])
+        # Helper function to add documents to the vectorstore and docstore
+        def add_documents(retriever: MultiVectorRetriever,
+                          doc_summaries: List[str],
+                          doc_contents: List[Dict | str]
+                          ):
+            doc_ids = [str(uuid.uuid4()) for _ in doc_contents]
 
-for item in table_composites:
-    tables.append({'text_as_html': item['text_as_html'],
-                   'doc_path': item['doc_path']
-                   })
-    table_summaries.append(item['summary'])
+            summary_docs = []
+            for index, summary in enumerate(tqdm(doc_summaries, ncols=100)):
+                summary_docs.append(Document(page_content=summary, metadata={id_key: doc_ids[index]}))
+            # summary_docs = [
+            #     Document(page_content=summary, metadata={id_key: doc_ids[index]})
+            #     for index, summary in enumerate(doc_summaries)
+            # ]
 
-# Generate image summaries
-summarize.generate_image_summaries()
-image_composites = summarize.image_summaries
-images, image_summaries = [], []
-for item in image_composites:
-    images.append({'img_base64': item['img_base64'],
-                   'image_path': item['image_path']
-                   })
-    image_summaries.append(item['summary'])
+            retriever.vectorstore.add_documents(summary_docs)
+            retriever.docstore.mset(list(zip(doc_ids, doc_contents)))
 
-img_base64_list = [item['img_base64'] for item in images]
+        # Add texts, tables, and images
+        # Check that text_summaries is not empty before adding
+        if text_summaries:
+            print("Embedding text summaries")
+            add_documents(retriever=retriever, doc_summaries=text_summaries, doc_contents=texts)
+        # Check that table_summaries is not empty before adding
+        if table_summaries:
+            print("Embedding table summaries")
+            add_documents(retriever=retriever, doc_summaries=table_summaries, doc_contents=tables)
+        # Check that image_summaries is not empty before adding
+        if image_summaries:
+            print("Embedding image summaries")
+            add_documents(retriever=retriever, doc_summaries=image_summaries, doc_contents=images)
 
-# Create retriever
-retriever_multi_vector_img = create_multi_vector_retriever(
-    vectorstore=vectorstore,
-    text_summaries=text_summaries,
-    texts=texts,
-    table_summaries=table_summaries,
-    tables=tables,
-    image_summaries=image_summaries,
-    images=img_base64_list,
-)
+        return retriever
 
-result = retriever_multi_vector_img.invoke("model comparison")
