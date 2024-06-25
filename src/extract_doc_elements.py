@@ -36,7 +36,22 @@ class ElementExtractor:
         preferred_chunk_size = self.chunk_size - 200
         text_combination_threshold = int(self.chunk_size / 2)
 
+        # Remove all image files before parsing new files
+        image_files = [self.image_dir + '/' + file for file in os.listdir(self.image_dir)
+                       if file.split(".")[-1] == 'jpg']
+        print("Removing old images...")
+        for file in image_files:
+            os.remove(file)
+
+        if len(os.listdir(self.image_dir)) == 0:
+            print("All image files removed")
+        else:
+            print("Removal failed!")
+            exit(1)
+
+        # Parse elements
         for file_path in tqdm(file_paths, ncols=100):
+            print(f'Parsing file: {file_path}')
             self.raw_elements.append(partition_pdf(filename=file_path,
                                                    chunking_strategy='by_title',
                                                    max_characters=max_chunk_size,

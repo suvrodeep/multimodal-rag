@@ -15,6 +15,7 @@ from tqdm import tqdm
 from PIL import Image
 
 import sys
+
 sys.path.extend(['./src'])
 
 from extract_doc_elements import ElementExtractor
@@ -27,14 +28,6 @@ input_path = "./data/input"
 image_path = "./data/image"
 key_path = "./config/keys.ini"
 config_path = "./config/model_config.ini"
-
-
-def plt_img_base64(img_base64):
-    """Display base64 encoded string as image"""
-    # Create an HTML img tag with the base64 string as the source
-    image_html = f'<img src="data:image/jpeg;base64,{img_base64}" />'
-    # Display the image by rendering the HTML
-    display(HTML(image_html))
 
 
 def looks_like_base64(sb):
@@ -91,11 +84,15 @@ def split_image_text_types(docs):
         # Check if the document is of type Document and extract page_content if so
         if isinstance(doc, Document):
             doc = doc.page_content
-        if looks_like_base64(doc) and is_image_data(doc):
-            doc = resize_base64_image(doc, size=(1200, 900))
-            b64_images.append(doc)
-        else:
-            texts.append(doc)
+        if type(doc) is str:
+            if looks_like_base64(doc) and is_image_data(doc):
+                doc = resize_base64_image(doc, size=(1200, 900))
+                b64_images.append(doc)
+            else:
+                texts.append(doc)
+        # If dict then append text element only
+        elif type(doc) is dict:
+            texts.append(doc[list(doc.keys())[0]])
     return {"images": b64_images, "texts": texts}
 
 
@@ -121,7 +118,8 @@ def img_prompt_func(data_dict):
         "text": (
             "You are chatbot that provides answers to technical questions related to cloud infrastructure and "
             "machine learning.\n"
-            "You will be given a mixed of text, tables, and image(s) usually of charts or graphs.\n"
+            "You will be given a mixed of text, tables, and image(s) usually of charts, graphs or flow diagrams.\n"
+            "The tables provided will be formatted as HTML. You can output the table if necessary.\n"
             "Use this information to provide answers related to the user question. \n"
             f"User-provided question: {data_dict['question']}\n\n"
             "Text and / or tables:\n"
@@ -138,17 +136,17 @@ def multi_modal_rag_chain(retriever, api_key: str):
     """
 
     # Multi-modal LLM
-    model = ChatOpenAI(temperature=0, model="gpt-4o", max_tokens=1024)
+    model = ChatOpenAI(temperature=0, model="gpt-4o", max_tokens=1024, api_key=api_key)
 
     # RAG pipeline
     chain = (
-        {
-            "context": retriever | RunnableLambda(split_image_text_types),
-            "question": RunnablePassthrough(),
-        }
-        | RunnableLambda(img_prompt_func)
-        | model
-        | StrOutputParser()
+            {
+                "context": retriever | RunnableLambda(split_image_text_types),
+                "question": RunnablePassthrough(),
+            }
+            | RunnableLambda(img_prompt_func)
+            | model
+            | StrOutputParser()
     )
 
     return chain
@@ -191,7 +189,7 @@ def get_retriever():
     vector_store = VectorStore(key_path=key_path, config_path=config_path)
     text_comp, table_comp, img_comp = generate_summary_composites()
 
-    retriever = MultiModalRetriever(vectorstore=vector_store,
+    retriever = MultiModalRetriever(vectorstore=vector_store.create_vector_store(),
                                     text_composites=text_comp,
                                     table_composites=table_comp,
                                     image_composites=img_comp
@@ -199,11 +197,12 @@ def get_retriever():
     return retriever.create_multi_vector_retriever()
 
 
-multimodal_retriever = get_retriever()
-
 # Create RAG chain
 config_parser = ConfigParser()
 config_parser.read(key_path)
-api_key = config_parser['multimodal-rag']['API_Key']
+key = config_parser['multimodal-rag']['API_Key']
 
-chain_multimodal_rag = multi_modal_rag_chain(multimodal_retriever, api_key=api_key)
+multimodal_retriever = get_retriever()
+chain_multimodal_rag = multi_modal_rag_chain(multimodal_retriever, api_key=key)
+query = "What is the best way to implement RAG using Google cloud"
+chain_multimodal_rag.invoke(query)
