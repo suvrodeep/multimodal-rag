@@ -62,7 +62,7 @@ def is_image_data(b64data):
         return False
 
 
-def resize_base64_image(base64_string, size=(128, 128)):
+def resize_base64_image(base64_string, size=(800, 600)):
     """
     Resize an image encoded as a Base64 string
     """
@@ -92,7 +92,7 @@ def split_image_text_types(docs):
         if isinstance(doc, Document):
             doc = doc.page_content
         if looks_like_base64(doc) and is_image_data(doc):
-            doc = resize_base64_image(doc, size=(1300, 600))
+            doc = resize_base64_image(doc, size=(1200, 900))
             b64_images.append(doc)
         else:
             texts.append(doc)
