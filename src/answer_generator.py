@@ -1,6 +1,7 @@
 import io
 import re
 import base64
+import textwrap
 
 from IPython.display import HTML, display
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
@@ -16,7 +17,7 @@ from PIL import Image
 
 import sys
 
-sys.path.extend(['./src'])
+# sys.path.extend(['./src'])
 
 from extract_doc_elements import ElementExtractor
 from extract_doc_elements import set_environ_vars
@@ -24,10 +25,10 @@ from generate_summaries import Summarize
 from tokenizer import Tokenizer
 from vector_store import VectorStore, MultiModalRetriever
 
-input_path = "./data/input"
-image_path = "./data/image"
-key_path = "./config/keys.ini"
-config_path = "./config/model_config.ini"
+input_path = "../data/input"
+image_path = "../data/image"
+key_path = "../config/keys.ini"
+config_path = "../config/model_config.ini"
 
 
 def looks_like_base64(sb):
@@ -47,7 +48,7 @@ def is_image_data(b64data):
     }
     try:
         header = base64.b64decode(b64data)[:8]  # Decode and get the first 8 bytes
-        for sig, format in image_signatures.items():
+        for sig, img_format in image_signatures.items():
             if header.startswith(sig):
                 return True
         return False
@@ -96,7 +97,7 @@ def split_image_text_types(docs):
     return {"images": b64_images, "texts": texts}
 
 
-def img_prompt_func(data_dict):
+def prompt_func(data_dict):
     """
     Join the context into a single string
     """
@@ -116,12 +117,11 @@ def img_prompt_func(data_dict):
     text_message = {
         "type": "text",
         "text": (
-            "You are chatbot that provides answers to technical questions related to cloud infrastructure and "
-            "machine learning.\n"
+            "Assume an expert role based on the user provided question.\n"
+            f"User provided question: {data_dict['question']}\n"
             "You will be given a mixed of text, tables, and image(s) usually of charts, graphs or flow diagrams.\n"
             "The tables provided will be formatted as HTML. You can output the table if necessary.\n"
-            "Use this information to provide answers related to the user question. \n"
-            f"User-provided question: {data_dict['question']}\n\n"
+            "Use this information to provide answers to the user question. \n\n"
             "Text and / or tables:\n"
             f"{formatted_texts}"
         ),
@@ -130,26 +130,37 @@ def img_prompt_func(data_dict):
     return [HumanMessage(content=messages)]
 
 
-def multi_modal_rag_chain(retriever, api_key: str):
-    """
-    Multi-modal RAG chain
-    """
+class Generation:
+    def __init__(self):
+        # Create RAG chain
+        config_parser = ConfigParser()
+        config_parser.read(key_path)
+        self.key = config_parser['multimodal-rag']['API_Key']
 
-    # Multi-modal LLM
-    model = ChatOpenAI(temperature=0, model="gpt-4o", max_tokens=1024, api_key=api_key)
+        config_parser.read(config_path)
+        self.model = config_parser['generation']['model']
+        self.max_tokens = config_parser['generation']['max_tokens']
+        self.temp = config_parser['generation']['temperature']
 
-    # RAG pipeline
-    chain = (
-            {
-                "context": retriever | RunnableLambda(split_image_text_types),
-                "question": RunnablePassthrough(),
-            }
-            | RunnableLambda(img_prompt_func)
-            | model
-            | StrOutputParser()
-    )
+    def multi_modal_rag_chain(self, retriever):
+        """
+        Multi-modal RAG chain
+        """
+        # Multi-modal LLM
+        model = ChatOpenAI(temperature=self.temp, model=self.model, max_tokens=self.max_tokens, api_key=self.key)
 
-    return chain
+        # RAG pipeline
+        chain = (
+                {
+                    "context": retriever | RunnableLambda(split_image_text_types),
+                    "question": RunnablePassthrough(),
+                }
+                | RunnableLambda(prompt_func)
+                | model
+                | StrOutputParser()
+        )
+
+        return chain
 
 
 def generate_summary_composites():
@@ -197,12 +208,21 @@ def get_retriever():
     return retriever.create_multi_vector_retriever()
 
 
-# Create RAG chain
-config_parser = ConfigParser()
-config_parser.read(key_path)
-key = config_parser['multimodal-rag']['API_Key']
+def main():
+    print("\n\nInitializing. Please wait...\n\n")
+    multimodal_retriever = get_retriever()
+    generation = Generation()
+    chain_multimodal_rag = generation.multi_modal_rag_chain(multimodal_retriever)
 
-multimodal_retriever = get_retriever()
-chain_multimodal_rag = multi_modal_rag_chain(multimodal_retriever, api_key=key)
-query = "What is the best way to implement RAG using Google cloud"
-chain_multimodal_rag.invoke(query)
+    while True:
+        query = input("\n\nPlease enter query: ")
+        if query is None or query == "":
+            print("\n\nNo input provided. Exiting chat loop. Exiting script.\n\n")
+            exit(0)
+        else:
+            response = chain_multimodal_rag.invoke(query)
+            print(f'\n\nResponse:\n{textwrap.fill(response, width=150)}')
+
+
+if __name__ == "__main__":
+    main()

@@ -38,7 +38,7 @@ class ElementExtractor:
 
         # Remove all image files before parsing new files
         image_files = [self.image_dir + '/' + file for file in os.listdir(self.image_dir)
-                       if file.split(".")[-1] == 'jpg']
+                       if file.split(".")[-1] in ['jpg', 'png']]
         print("Removing old images...")
         for file in image_files:
             os.remove(file)
