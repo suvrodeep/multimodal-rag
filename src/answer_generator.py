@@ -120,47 +120,15 @@ def prompt_func(data_dict):
             "Assume an expert role based on the user provided question.\n"
             f"User provided question: {data_dict['question']}\n"
             "You will be given a mixed of text, tables, and image(s) usually of charts, graphs or flow diagrams.\n"
-            "The tables provided will be formatted as HTML. You can output the table if necessary.\n"
-            "Use this information to provide answers to the user question. \n\n"
+            "Use only this information to provide answers to the user question.\n"
+            "If the answer is not found in the provided tables, texts or images \n"
+            "say its is not possible to answer from the given the data\n\n"
             "Text and / or tables:\n"
             f"{formatted_texts}"
         ),
     }
     messages.append(text_message)
     return [HumanMessage(content=messages)]
-
-
-class Generation:
-    def __init__(self):
-        # Create RAG chain
-        config_parser = ConfigParser()
-        config_parser.read(key_path)
-        self.key = config_parser['multimodal-rag']['API_Key']
-
-        config_parser.read(config_path)
-        self.model = config_parser['generation']['model']
-        self.max_tokens = config_parser['generation']['max_tokens']
-        self.temp = config_parser['generation']['temperature']
-
-    def multi_modal_rag_chain(self, retriever):
-        """
-        Multi-modal RAG chain
-        """
-        # Multi-modal LLM
-        model = ChatOpenAI(temperature=self.temp, model=self.model, max_tokens=self.max_tokens, api_key=self.key)
-
-        # RAG pipeline
-        chain = (
-                {
-                    "context": retriever | RunnableLambda(split_image_text_types),
-                    "question": RunnablePassthrough(),
-                }
-                | RunnableLambda(prompt_func)
-                | model
-                | StrOutputParser()
-        )
-
-        return chain
 
 
 def generate_summary_composites():
@@ -208,21 +176,55 @@ def get_retriever():
     return retriever.create_multi_vector_retriever()
 
 
-def main():
-    print("\n\nInitializing. Please wait...\n\n")
-    multimodal_retriever = get_retriever()
-    generation = Generation()
-    chain_multimodal_rag = generation.multi_modal_rag_chain(multimodal_retriever)
+class Generation:
+    def __init__(self):
+        # Create RAG chain
+        config_parser = ConfigParser()
+        config_parser.read(key_path)
+        self.key = config_parser['multimodal-rag']['API_Key']
 
-    while True:
-        query = input("\n\nPlease enter query: ")
-        if query is None or query == "":
-            print("\n\nNo input provided. Exiting chat loop. Exiting script.\n\n")
-            exit(0)
-        else:
-            response = chain_multimodal_rag.invoke(query)
-            print(f'\n\nResponse:\n{textwrap.fill(response, width=150)}')
+        config_parser.read(config_path)
+        self.model = config_parser['generation']['model']
+        self.max_tokens = config_parser['generation']['max_tokens']
+        self.temp = config_parser['generation']['temperature']
+
+        self.retriever = get_retriever()
+
+    def multi_modal_rag_chain(self):
+        """
+        Multi-modal RAG chain
+        """
+        # Multi-modal LLM
+        model = ChatOpenAI(temperature=self.temp, model=self.model, max_tokens=self.max_tokens, api_key=self.key)
+        retriever = self.retriever
+
+        # RAG pipeline
+        chain = (
+                {
+                    "context": retriever | RunnableLambda(split_image_text_types),
+                    "question": RunnablePassthrough(),
+                }
+                | RunnableLambda(prompt_func)
+                | model
+                | StrOutputParser()
+        )
+
+        return chain
 
 
-if __name__ == "__main__":
-    main()
+# def main():
+#     print("\n\nInitializing. Please wait...\n\n")
+#     generation = Generation()
+#     chain_multimodal_rag = generation.multi_modal_rag_chain()
+#     while True:
+#         query = input("\n\nPlease enter query: ")
+#         if query is None or query == "":
+#             print("\n\nNo input provided. Exiting chat loop. Exiting script.\n\n")
+#             exit(0)
+#         else:
+#             response = chain_multimodal_rag.invoke(query)
+#             print(f'\n\nResponse:\n{textwrap.fill(response, width=150)}')
+
+
+# if __name__ == "__main__":
+#     main()
