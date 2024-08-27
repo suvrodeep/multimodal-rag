@@ -90,6 +90,9 @@ class MultiModalRetriever:
         retriever = MultiVectorRetriever(vectorstore=self.vector_store,
                                          docstore=store,
                                          id_key=id_key,
+                                         search_type="mmr",
+                                         search_kwargs={"score_threshold": 0.8,
+                                                        "k": 3}
                                          )
 
         # Helper function to add documents to the vectorstore and docstore
